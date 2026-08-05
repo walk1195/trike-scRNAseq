@@ -10,7 +10,14 @@
 samples <- readLines("inputs/samples.txt")
 
 set.seed(123)
-sampleCols <- setNames(grDevices::hcl.colors(length(samples), palette = "Dynamic"), samples)
+#sampleCols <- setNames(grDevices::hcl.colors(length(samples), palette = "Dynamic"), samples)
+
+sampleCols <- c(
+  "trike_01_pretx" = "#DB9D85",
+  "trike_01_2w"    = "#86B875",
+  "trike_02_pretx" = "#4CB9CC",
+  "trike_02_2w"    = "#4A78A8"
+)
 
 # ------------------------------------------------------------------------------
 # Automated annotations

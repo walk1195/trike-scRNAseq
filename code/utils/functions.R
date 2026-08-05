@@ -7,7 +7,7 @@ library(scales)
 library(EnhancedVolcano)
 
 # ==============================================================================
-# Generate QC Plots
+# QC Plots - per sample
 # ==============================================================================
 generate_qc_plots <- function(seu.obj, sample_id, resDir, feature_min, count_min, mt_threshold, sample_colors) {
   
@@ -63,14 +63,143 @@ generate_qc_plots <- function(seu.obj, sample_id, resDir, feature_min, count_min
   ggsave(paste0(resDir,'qc_density_plots.png'), plot=density_plots, dpi=400, width=15, height=6)
 }
 
+# ==============================================================================
+# QC plots - all samples
+# ==============================================================================
 
+all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFeat=F, nCount=F, mt=F, density=F) {
+  # Initialize list to store plots
+  plots <- list()
+  # Grab qc data
+  qc_df <- do.call(rbind, lapply(obj_list, \(x) x@meta.data))
+  qc_df$sample <- rep(names(obj_list), sapply(obj_list, ncol))
+  
+  # Set sample order
+  if (!is.null(order)) {qc_df$sample <- factor(qc_df$sample, levels = order)}
+  
+  ### (1) Raw cell counts barplot
+  if (cell_count) {
+    cell_counts <- as.data.frame(table(qc_df$sample))
+    colnames(cell_counts) <- c("sample", "count")
+    p.cell_counts <- ggplot(cell_counts, aes(x=sample, y=count, fill=sample)) +
+      geom_col(color='black') +
+      scale_fill_manual(values = custom_cols) +
+      theme_classic() +
+      labs(title='Cell Counts (unfiltered)', x="Sample", y='# of Cells') +
+      theme(axis.text.x = element_text(angle = 45, hjust=1),
+            axis.title = element_text(face='bold'),
+            plot.title = element_text(hjust=0.5, face='bold'),
+            legend.position = 'none')
+    plots$cell_count <- p.cell_counts
+    ggsave(paste0(resDir,'all_samples_counts_unfiltered.png'), plot=p.cell_counts, dpi=400, width=5, height=6)
+  }
+  
+  ### (2) nFeature_RNA violin plot
+  if (nFeat) {
+    p.nFeat <- ggplot(qc_df, aes(x=sample, y=nFeature_RNA, fill=sample)) +
+      geom_violin(scale="width") +
+      scale_fill_manual(values = custom_cols) +
+      theme_classic() +
+      labs(title='nFeature_RNA', x="Sample", y="# Features") +
+      theme(axis.text.x = element_text(angle=45, hjust=1),
+            axis.title = element_text(face='bold'),
+            plot.title = element_text(hjust=0.5, face='bold'))
+    plots$nFeat <- p.nFeat
+    ggsave(paste0(resDir,'all_samples_nFeature.png'), plot=p.nFeat, dpi=400, width=6, height=6)
+  }
+  
+  ### (3) nCount_RNA violin plot
+  if (nCount) {
+    p.nCount <- ggplot(qc_df, aes(x=sample, y=nCount_RNA, fill=sample)) +
+      geom_violin(scale="width") +
+      scale_fill_manual(values = custom_cols) +
+      theme_classic() +
+      labs(title='nCount_RNA', x="Sample", y="# UMIs") +
+      theme(axis.text.x = element_text(angle=45, hjust=1),
+            axis.title = element_text(face='bold'),
+            plot.title = element_text(hjust=0.5, face='bold'))
+    plots$nCount <- p.nCount
+    ggsave(paste0(resDir,'all_samples_nCount.png'), plot=p.nCount, dpi=400, width=6, height=6)
+  }
 
+  ### (4) MT Expression violin plot
+  if (mt) {
+    p.mt <- ggplot(qc_df, aes(x=sample, y=percent.mt, fill=sample)) +
+      geom_violin(scale="width") +
+      scale_fill_manual(values = custom_cols) +
+      theme_classic() +
+      labs(title='nCount_RNA', x="Sample", y="# UMIs") +
+      theme(axis.text.x = element_text(angle=45, hjust=1),
+            axis.title = element_text(face='bold'),
+            plot.title = element_text(hjust=0.5, face='bold'))
+    plots$mt <- p.mt
+    ggsave(paste0(resDir,'all_samples_MT.png'), plot=p.mt, dpi=400, width=6, height=6)
+  }
+  
+  ### (5) Density plots (all samples, all metrics)
+  if (density) {
+    p.density1 <- ggplot(qc_df, aes(x=nFeature_RNA, color=orig.ident, fill=orig.ident, group=orig.ident)) + 
+      geom_density(alpha = 0.2) + 
+      theme_classic() + 
+      scale_x_log10() + 
+      scale_fill_manual(values = custom_cols) +
+      scale_color_manual(values = custom_cols) +
+      geom_vline(xintercept = 350,color="red",linetype="dotted") + # Include this if plotting threshold line
+      theme(plot.title = element_text(hjust=0.5, face="bold"), legend.position = 'none') +
+      ggtitle("nFeature Distribution")
+    p.density2 <- ggplot(qc_df, aes(x=nCount_RNA, color=orig.ident, fill=orig.ident, group=orig.ident)) + 
+      geom_density(alpha = 0.2) + 
+      theme_classic() + 
+      scale_x_log10() + 
+      scale_fill_manual(values = custom_cols) +
+      scale_color_manual(values = custom_cols) +
+      geom_vline(xintercept = 1000,color="red",linetype="dotted") + # Include this if plotting threshold line
+      theme(plot.title = element_text(hjust=0.5, face="bold"), legend.position = 'none') +
+      ggtitle("nCount Distribution")
+    p.density3 <- ggplot(qc_df, aes(x=percent.mt, color=orig.ident, fill=orig.ident)) + 
+      geom_density(alpha = 0.2) +
+      theme_classic() +
+      scale_x_log10(labels = label_comma()) +
+      scale_fill_manual(values = custom_cols) +
+      scale_color_manual(values = custom_cols) +
+      geom_vline(xintercept = 15,color="red",linetype="dotted") +
+      theme(plot.title = element_text(hjust=0.5, face="bold")) +
+      ggtitle("MT % Expression") +
+      guides(color = guide_legend(title = "Sample"),
+             fill = guide_legend(title = "Sample"))
+    density_plots <- p.density1 + p.density2 + p.density3
+    plots$density <- density_plots
+    ggsave(paste0(resDir,'all_samples_density_plots.png'), plot=density_plots, dpi=400, width=15, height=6)
+  }
+    return(plots)
+}
+
+# ==============================================================================
+# Filter seurat object
+# ==============================================================================
+
+filter_out_cells <- function(seu.obj, feature_min=NULL, count_min=NULL, mt_threshold=NULL) {
+  
+  print('Filtering out low quality cells...')
+  
+  prefilter_count = length(Cells(seu.obj))
+  
+  seu.obj@meta.data$keep <- with(seu.obj@meta.data, ifelse(nFeature_RNA > feature_min & nCount_RNA > count_min & percent.mt < mt_threshold, TRUE, FALSE))
+  seu.obj <- subset(seu.obj, subset = keep == TRUE)
+
+  postfilter_count = length(Cells(seu.obj))
+  
+  total = prefilter_count - postfilter_count
+  print(glue::glue("Cells removed from {sample_id} : {total}"))
+  
+  return(seu.obj)
+}
 
 # ==============================================================================
 # Grab CPMs
 # ==============================================================================
 
-# TODO: insert function to extract cpm matrix from seurat obj
+# TODO: insert function to extract cpm matrix from either (1) seurat obj or (2) cellranger output
 
 
 
