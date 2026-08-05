@@ -1,11 +1,5 @@
 #!/usr/bin/Rscript
 
-# Load libs
-library(Seurat)
-library(tidyverse)
-library(scales)
-library(EnhancedVolcano)
-
 # ==============================================================================
 # QC Plots - per sample
 # ==============================================================================

@@ -7,7 +7,7 @@
 # ------------------------------------------------------------------------------
 # Samples
 # ------------------------------------------------------------------------------
-samples <- readLines("inputs/samples.txt")
+#samples <- readLines("inputs/samples.txt")
 
 set.seed(123)
 #sampleCols <- setNames(grDevices::hcl.colors(length(samples), palette = "Dynamic"), samples)

@@ -17,19 +17,19 @@ library(tidyverse)
 library(Seurat)
 library(patchwork)
 
-# Dirs
-projDir <- getwd()
-dataDir <- 'inputs/data/' # symlinked from data_delivery
-objDir <- 'out/Objects/'
-resDir <- 'out/Figures/Preprocessing/'
+# Functions
+source("code/utils/functions.R")
+source("code/utils/colormaps.R")
 
 # Params
 options(future.globals.maxSize = 4 * 1024^3)  # Set to 4 GB
 gc() # free up memory
 
-# Functions
-source("code/utils/functions.R")
-source("code/utils/colormaps.R")
+# Dirs
+projDir <- getwd()
+dataDir <- 'inputs/data/' # symlinked from data_delivery
+objDir <- 'out/Objects/'
+resDir <- 'out/Figures/Preprocessing/'
 
 # List of samples
 sample_ids <- readLines(paste0(projDir,'/inputs/cellranger_ids.txt'))
@@ -121,10 +121,28 @@ for (i in 1:length(objects)) {
 }
 
 # ------------------------------------------------------------------------------
-# Doublet removal
+# Mark doublets (not removing yet)
 # ------------------------------------------------------------------------------
 
+# Grab no. of cells
+cellNum <- dim(s1)[2]
+percentDoub <- ((8e-6)*cellNum)+0.0005 # linear equation I calculated from 10x genomics table
+nExp_poi <- round(percentDoub*nrow(s1@meta.data)) 
+s1 <- doubletFinder(s1, PCs = 1:10, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = TRUE)
+colnames(s1@meta.data)[length(colnames(s1@meta.data))] <- "DF.classifications"
+Idents(s1) <- "DF.classifications"
+DF.name <- colnames(s1@meta.data)[grepl("DF.classification", colnames(s1@meta.data))]
 
+
+# ------------------------------------------------------------------------------
+# Merge samples into single obj
+# ------------------------------------------------------------------------------
+
+# Perform merge
+s1.merged <- merge(x = objects[[1]], y = objects[-1], add.cell.ids = names(objects))
+
+# Save
+saveRDS(s1.merged, file=glue::glue("{objDir}merged_object.rds"))
 
 
 ########### Session info ###########
