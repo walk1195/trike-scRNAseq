@@ -47,23 +47,132 @@ sample_ids <- readLines(paste0(projDir,'/inputs/samples.txt'))
 # Read in data
 s1 <- readRDS(file=glue::glue("{objDir}merged_object.rds"))
 
-
 # ------------------------------------------------------------------------------
-# Log-normalize and scale
+# Library-size normalization
 # ------------------------------------------------------------------------------
 
-# Log normalization
-s1 <- NormalizeData(s1, normalization.method = "LogNormalize", scale.factor = 10000)
+########################### Some notes about normalization ##################################
+
+# https://www.reddit.com/r/bioinformatics/comments/c3jd6s/seurat_scrnaseq_normalization/
+
+# Library-size norm. is by far the most common and simple method of normalizing scRNAseq
+# Lib size = total sum of counts for all genes in a given cell
+# Normalized counts for a given cell = feature_counts / lib.size * scale.factor
+  ### where scale.factor is either
+      ### 10e6 (cpm, recommended for bulk RNAseq), or
+      ### 10k (seurat recommended for scRNAseq)
+
+# CPM can greatly inflate the difference between a 0 and a 1 count in the log-space
+# Say  you had 4 cells, each with 10k total counts, and for a particular gene, they have 0, 1, 2, and 3 counts respectively
+
+  ## Using log(1+counts/million) this gives:
+  
+     # [0, 1, 2, 3] -> [0, 4.6, 5.3, 5.7]
+
+  ## Using log(1+counts/10k) this gives:
+  
+     # [0, 1, 2, 3] -> [0, .7, 1.1, 1.4]
+
+# Using cpm introduces a large difference between 0 to 1, and a much smaller difference between 1 count a 2 counts
+
+# With cp10k, the 0-1 difference is only 1.7x the 1-2 difference.
+
+#### In general, it's probably best to use a scale factor that is similar in order of magnitude to the # of counts you're getting.
+     # For bulk or even full-length transcript single-cell data, you get millions of counts.
+     # With UMI single-cell data you get 1000s to 10,000s of counts.
+
+### Using the median raw count depth of the dataset
+
+# Log normalization -- this is performed on cell-by-cell basis, so having independent counts layers doesn't matter
+s1 <- NormalizeData(s1, normalization.method = "LogNormalize", scale.factor = median(s1$nCount_RNA)) # Scale by the median total UMI per cell = 8691
+
+# Join layers
+s1 <- JoinLayer(s1)
+
+s1[["RNA"]] <- split(s1[["RNA"]], f = s1$orig.ident)
+
+############################################################################################
 # Variable Features
-s1 <- FindVariableFeatures(s1, selection.method = "vst", nfeatures = 3000)
-# Plot
-top10 <- head(VariableFeatures(s1), 10)
-plot1 <- VariableFeaturePlot(s1)
-plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
-ggsave('top_variable_features.png', plot=plot1 + plot2, width = 10, height = 5, dpi=400)
 
-# Scale
-s1 <- ScaleData(s1)
+# https://github.com/satijalab/seurat/issues/9808
+# FindVariableFeatures() will find variable genes for each layer
+# then find a union set of variable genes based on the ranking and the number of appearance (as an HVG) of them in each layer/sample.
+# If some of the genes are specific to one layer, it will not be counted as a HVG in the final list.
+
+s1 <- FindVariableFeatures(s1, selection.method = "vst", nfeatures = 3000)
+
+s1 <- s1 %>%
+  ScaleData() %>%
+  RunPCA()
+
+# Elbow plot
+p <- ElbowPlot(s1, ndims = 50)
+ggsave(file=glue::glue("{resDir}elbow_plot.png"), plot=p, dpi=400, height=5, width=6)
+
+# Run integration
+s1 <- IntegrateLayers(object = s1, method = HarmonyIntegration, orig.reduction = "pca",
+                       new.reduction = "harmony", verbose = FALSE)
+
+# Neighbors & UMAP
+s1 <- s1 %>%
+  FindNeighbors(dims = 1:30, reduction='harmony') %>%
+  RunUMAP(dims = 1:30, reduction='harmony', reduction.name='umap.harmony')
+
+### Sample ID UMAP
+p <- DimPlot(s1, group.by='orig.ident', cols=sampleCols, pt.size=0.01, reduction='umap.harmony')
+formatUMAP(p, smallAxes = T)
+ggsave(paste0(resDir, 'umap_by_sample_integrated.png'), plot=p1, dpi=400, height=7, width=8)
+ggsave(paste0(resDir, 'umap_by_sample_unintegrated.png'), plot=p1, dpi=400, height=7, width=8)
+
+### Cell types
+p <- DimPlot(s1, group.by='blue_pruned', cols=encodeCols, pt.size=0.01, reduction='umap.harmony')
+formatUMAP(p, smallAxes = T)
+
+### nFeat, nCount, MT expr
+FeaturePlot(s1, features=c('nFeature_RNA', 'nCount_RNA', 'percent.mt' ), reduction='umap.harmony')
+
+### Doublet distribution
+p1 <- DimPlot(s1, group.by=c('scDblFinder.class'), reduction='umap.harmony')
+
+### Cell type markers
+p2 <- FeaturePlot(s1, features='nFeature_RNA', reduction='umap.harmony')
+p1+p2
+
+
+# Integration
+s1 <- IntegrateLayers(object = s1, method = HarmonyIntegration, orig.reduction = "pca",
+                       new.reduction = "harmony", verbose = FALSE)
+
+############################################################################################
+# TODO:
+
+# (1) Clustering iterations:
+    ### Initial first pass w/ default values
+        
+
+    ### More stringent cell filtering
+    
+    
+    ### Doublets removed
+
+    
+    ### Multiple n_pc values
+
+
+    ### Integrated dataset -- will not influence diff expr; just clustering & visualization
+
+
+
+# For each of these iterations, we want to save the following plots to a unique folder:
+  # - UMAP by sample (orig.ident)
+  # - FeaturePlot by nFeature, nCount, mt ***customize color and axes
+  # - Some cell type markers (CD3E, GZMA, ) ***customize color and axes
+
+# (2) Run SingleR using Ammons reference
+
+############################################################################################
+
+FeaturePlot(s1, features='CD3E')
 
 ### PCA, UMAP, & clustering
 
@@ -202,7 +311,11 @@ plot_features_safe(s1, myeloid, "umap_myeloid_markers.png")
 prolif <- c('MKI67', 'TOP2A', 'CENPF','BUB1')
 plot_features_safe(s1, prolif, "umap_prolif_markers.png")
 
+##### Save
+saveRDS(s1, file=glue::glue("{objDir}merged_object.rds"))
 
+##### Session info
+sessionInfo()
 
 
 

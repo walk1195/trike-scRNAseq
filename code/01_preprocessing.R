@@ -16,6 +16,7 @@
 library(tidyverse)
 library(Seurat)
 library(patchwork)
+library(scDblFinder)
 
 # Functions
 source("code/utils/functions.R")
@@ -36,6 +37,18 @@ sample_ids <- readLines(paste0(projDir,'/inputs/cellranger_ids.txt'))
 
 # New IDs
 new_sample_ids <- readLines(paste0(projDir,'/inputs/samples.txt'))
+
+
+# ------------------------------------------------------------------------------
+# To read in individual samples if iterating back over QC
+objects <- c()
+for (obj in list.files(objDir)) {
+  s1 <- readRDS(file=glue::glue("{objDir}{obj}"))
+  sample_id <- gsub('_filtered.rds', '', obj)
+  objects[[sample_id]] <- s1
+}
+objects$merged_object.rds <- NULL
+# ------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------
 # Generate Seurat objects
@@ -88,9 +101,6 @@ custom_order <- c('trike_01_pretx', 'trike_01_2w', 'trike_02_pretx', 'trike_02_2
 # Plot
 all_sample_qc_plots(objects, order=custom_order, custom_cols=sampleCols, cell_count=T, nFeat=T, nCount=T, mt=T, density=T)
 
-# Testing just density plot
-all_sample_qc_plots(objects, order=custom_order, custom_cols=sampleCols, density=T)
-
 # ------------------------------------------------------------------------------
 # Filter each dataset
 # ------------------------------------------------------------------------------
@@ -120,19 +130,37 @@ for (i in 1:length(objects)) {
   saveRDS(s1, glue::glue("{objDir}{sample_id}_filtered.rds"))
 }
 
+
 # ------------------------------------------------------------------------------
 # Mark doublets (not removing yet)
 # ------------------------------------------------------------------------------
 
-# Grab no. of cells
-cellNum <- dim(s1)[2]
-percentDoub <- ((8e-6)*cellNum)+0.0005 # linear equation I calculated from 10x genomics table
-nExp_poi <- round(percentDoub*nrow(s1@meta.data)) 
-s1 <- doubletFinder(s1, PCs = 1:10, pN = 0.25, pK = 0.09, nExp = nExp_poi, reuse.pANN = FALSE, sct = TRUE)
-colnames(s1@meta.data)[length(colnames(s1@meta.data))] <- "DF.classifications"
-Idents(s1) <- "DF.classifications"
-DF.name <- colnames(s1@meta.data)[grepl("DF.classification", colnames(s1@meta.data))]
+#### Calculate multiplet rate ####
 
+# For 10x data, scDblFinder automatically estimates the doublet rate parameter (dbr) on a 0.08% per 1000 cells basis
+# This is not up to date with GEM-X technology, so setting dbr manually:
+
+# 10x Chromium GEM-X Single Cell 3' Reagent Kits v4 User Guide:
+  # https://cdn.10xgenomics.com/image/upload/v1725314293/support-documents/CG000731_ChromiumGEM-X_SingleCell3v4_UserGuide_RevB.pdf
+  # pg 19-20 shows the multiplet rate table
+  # for 20k cell recovery, expected doublet rate is 8% 
+
+# Call doublet finder function (per sample)
+for (sample_id in names(objects)) {
+  # Get obj
+  s1 <- objects[[sample_id]]
+  # Call function
+  s1 <- run_doublet_finder(s1, multiplet_rate = 0.08)
+  
+  # Plot results
+  curr_dir <- paste0(resDir, sample_id, '/')
+  
+  p <- VlnPlot(s1, features=c('nFeature_RNA', 'nCount_RNA'), split.by='scDblFinder.class', pt.size = 0)
+  ggsave(paste0(curr_dir,'doublet_finder_vln_plots.png'), plot=p, dpi=400, height=6, width=9)
+  
+  # Update list
+  objects[[sample_id]] <- s1
+}
 
 # ------------------------------------------------------------------------------
 # Merge samples into single obj
@@ -141,9 +169,9 @@ DF.name <- colnames(s1@meta.data)[grepl("DF.classification", colnames(s1@meta.da
 # Perform merge
 s1.merged <- merge(x = objects[[1]], y = objects[-1], add.cell.ids = names(objects))
 
-# Save
-saveRDS(s1.merged, file=glue::glue("{objDir}merged_object.rds"))
+########### Save progress ###########
 
+saveRDS(s1.merged, file=glue::glue("{objDir}merged_object.rds"))
 
 ########### Session info ###########
 sessionInfo()

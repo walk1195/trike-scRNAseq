@@ -1,5 +1,10 @@
 #!/usr/bin/Rscript
 
+# Load libs
+library(scDblFinder)
+library(Seurat)
+library(tidyverse)
+
 # ==============================================================================
 # QC Plots - per sample
 # ==============================================================================
@@ -60,7 +65,6 @@ generate_qc_plots <- function(seu.obj, sample_id, resDir, feature_min, count_min
 # ==============================================================================
 # QC plots - all samples
 # ==============================================================================
-
 all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFeat=F, nCount=F, mt=F, density=F) {
   # Initialize list to store plots
   plots <- list()
@@ -72,7 +76,7 @@ all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFea
   if (!is.null(order)) {qc_df$sample <- factor(qc_df$sample, levels = order)}
   
   ### (1) Raw cell counts barplot
-  if (cell_count) {
+  if (!is.null(cell_count)) {
     cell_counts <- as.data.frame(table(qc_df$sample))
     colnames(cell_counts) <- c("sample", "count")
     p.cell_counts <- ggplot(cell_counts, aes(x=sample, y=count, fill=sample)) +
@@ -89,7 +93,7 @@ all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFea
   }
   
   ### (2) nFeature_RNA violin plot
-  if (nFeat) {
+  if (!is.null(nFeat)) {
     p.nFeat <- ggplot(qc_df, aes(x=sample, y=nFeature_RNA, fill=sample)) +
       geom_violin(scale="width") +
       scale_fill_manual(values = custom_cols) +
@@ -103,7 +107,7 @@ all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFea
   }
   
   ### (3) nCount_RNA violin plot
-  if (nCount) {
+  if (!is.null(nCount)) {
     p.nCount <- ggplot(qc_df, aes(x=sample, y=nCount_RNA, fill=sample)) +
       geom_violin(scale="width") +
       scale_fill_manual(values = custom_cols) +
@@ -117,7 +121,7 @@ all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFea
   }
 
   ### (4) MT Expression violin plot
-  if (mt) {
+  if (!is.null(mt)) {
     p.mt <- ggplot(qc_df, aes(x=sample, y=percent.mt, fill=sample)) +
       geom_violin(scale="width") +
       scale_fill_manual(values = custom_cols) +
@@ -131,7 +135,7 @@ all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFea
   }
   
   ### (5) Density plots (all samples, all metrics)
-  if (density) {
+  if (!is.null(density)) {
     p.density1 <- ggplot(qc_df, aes(x=nFeature_RNA, color=orig.ident, fill=orig.ident, group=orig.ident)) + 
       geom_density(alpha = 0.2) + 
       theme_classic() + 
@@ -171,7 +175,6 @@ all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFea
 # ==============================================================================
 # Filter seurat object
 # ==============================================================================
-
 filter_out_cells <- function(seu.obj, feature_min=NULL, count_min=NULL, mt_threshold=NULL) {
   
   print('Filtering out low quality cells...')
@@ -190,12 +193,76 @@ filter_out_cells <- function(seu.obj, feature_min=NULL, count_min=NULL, mt_thres
 }
 
 # ==============================================================================
-# Grab CPMs
+# Get doublets
 # ==============================================================================
+run_doublet_finder <- function(seu.obj, multiplet_rate=NULL) {
+  
+  sample_id <- unique(seu.obj$orig.ident)
+  
+  print(glue::glue("Running doublet prediction for {sample_id}...."))
+  
+  # Convert seurat to sce
+  sce <- as.SingleCellExperiment(seu.obj)
+  
+  # Call doublet function
+  if (!is.null(multiplet_rate)) {
+    sce <- scDblFinder(sce, dbr = multiplet_rate) # manual dbr
+  } else {
+    sce <- scDblFinder(sce) # automatically estimate dbr
+  }
 
-# TODO: insert function to extract cpm matrix from either (1) seurat obj or (2) cellranger output
+  # Inspect results
+  print('Summary of doublet results:')
+  print(table(sce$scDblFinder.class))
 
+  # Convert results to df
+  doublet_res <- dplyr::select(as.data.frame(sce@colData), starts_with('scDBlFinder'))
+  
+  # Merge back into seurat obj
+  seu.obj <- AddMetaData(seu.obj, metadata=doublet_res)
+  
+  return(seu.obj)
+}
 
+# ==============================================================================
+# Run standard clustering
+# ==============================================================================
+run_standard_clustering <- function(seu.obj, resDir, n_pcs, elbow_plot=NULL) {
+  # PCA
+  print('Scaling data & running PCA...')
+  seu.obj <- seu.obj %>%
+    ScaleData() %>%
+    RunPCA()
+  # Elbow plot
+  if (!is.null(elbow_plot)) {
+    p <- ElbowPlot(s1, ndims = 50) # Elbow plot
+    ggsave(file=glue::glue("{resDir}elbow_plot.png"), plot=p, dpi=400, height=5, width=6)
+  }
+  # Neighbors & UMAP
+  print('Generating neighbors graph & UMAP embeddings...')
+  seu.obj <- seu.obj %>%
+    FindNeighbors(dims = 1:n_pcs) %>%
+    RunUMAP(dims = 1:n_pcs)
+  
+  #### Plotting ####
+  print('Processing done. Generating plots....')
+  
+  ### Sample ID UMAP
+  p1 <- DimPlot(s1, group.by='orig.ident', cols=sampleCols)
+  formatUMAP(p1, smallAxes = T)
+  
+  ### nFeat, nCount, MT expr
+  FeaturePlot(s1, features=c('nFeature_RNA', 'nCount_RNA', 'MT' ))
+  
+  ### Doublet distribution
+  p1 <- DimPlot(s1, group.by=c('scDblFinder.class'))
+  
+  ### Cell type markers
+  p2 <- FeaturePlot(s1, features='nFeature_RNA')
+  p1+p2
+  
+  return(seu.obj)
+}
 
 # ==============================================================================
 # Prettier UMAPs & VolcanoPlots
@@ -243,16 +310,21 @@ formatUMAP <- function(plot = NULL, smallAxes = F) {
         panel.grid.minor = element_blank()
       )
     
-    plot <- plot + theme(axis.title = element_blank(),
-                         panel.border = element_blank(),
-                         plot.margin = unit(c(-7, -7, -7, -7), "pt"))
+    plot <- plot + theme(
+      axis.title = element_blank(),
+      panel.border = element_blank(),
+      plot.margin = margin(25, 25, 25, 25)
+    )
     
-    plot <- plot + inset_element(axes,
-                                 left = 0,
-                                 bottom = 0,
-                                 right = 0.25,
-                                 top = 0.25,
-                                 align_to = "full")
+    plot <- plot + inset_element(
+      axes,
+      left = -0.03,
+      bottom = -0.03,
+      right = 0.18,
+      top = 0.18,
+      align_to = "panel",
+      clip = FALSE
+    )
   }
   
   return(plot)
@@ -417,6 +489,36 @@ prettyFeats <- function(seu.obj = NULL, nrow = 3, ncol = NULL, features = "", co
     return(p)
   }
 }
+
+
+# ==============================================================================
+# Grab CPMs
+# ==============================================================================
+
+# TODO: insert function to extract cpm matrix from either (1) seurat obj or (2) cellranger output
+# 
+# extract_cpms <- function(seu.obj=NULL, cellranger_path=NULL, ) {
+#   
+#   # Check first for seurat obj
+#   if (seu.obj) {
+#     
+#     # Ensure the raw counts assay is set
+#     seu.obj <- 
+#       
+#     # CPM normalize
+#     NormalizeData(seu.obj, normalization.method='RC', scale.factor=1e6) # 1mil scale factor
+#     
+#     # CP10k normalize
+#     NormalizeData(seu.obj, normalization.method='RC', scale.factor=10000) # 10k scale factor
+#     
+#   }
+#   
+#   # If not seurat obj, check for cell ranger path
+#   if cell_ranger_path {
+#     
+#   }
+#   
+# }
 
 
 
