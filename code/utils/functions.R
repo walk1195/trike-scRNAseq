@@ -65,7 +65,7 @@ generate_qc_plots <- function(seu.obj, sample_id, resDir, feature_min, count_min
 # ==============================================================================
 # QC plots - all samples
 # ==============================================================================
-all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFeat=F, nCount=F, mt=F, density=F) {
+all_sample_qc_plots <- function(obj_list, order, custom_cols, resDir=resDir, cell_count=NULL, nFeat=NULL, nCount=NULL, mt=NULL, density=NULL) {
   # Initialize list to store plots
   plots <- list()
   # Grab qc data
@@ -83,7 +83,7 @@ all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFea
       geom_col(color='black') +
       scale_fill_manual(values = custom_cols) +
       theme_classic() +
-      labs(title='Cell Counts (unfiltered)', x="Sample", y='# of Cells') +
+      labs(title='Raw Cell Counts', x="Sample", y='Cell Count') +
       theme(axis.text.x = element_text(angle = 45, hjust=1),
             axis.title = element_text(face='bold'),
             plot.title = element_text(hjust=0.5, face='bold'),
@@ -126,7 +126,7 @@ all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFea
       geom_violin(scale="width") +
       scale_fill_manual(values = custom_cols) +
       theme_classic() +
-      labs(title='nCount_RNA', x="Sample", y="# UMIs") +
+      labs(title='MT Expression', x="Sample", y="% MT") +
       theme(axis.text.x = element_text(angle=45, hjust=1),
             axis.title = element_text(face='bold'),
             plot.title = element_text(hjust=0.5, face='bold'))
@@ -142,7 +142,7 @@ all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFea
       scale_x_log10() + 
       scale_fill_manual(values = custom_cols) +
       scale_color_manual(values = custom_cols) +
-      geom_vline(xintercept = 350,color="red",linetype="dotted") + # Include this if plotting threshold line
+      geom_vline(xintercept = 650,color="red",linetype="dotted") + # Include this if plotting threshold line
       theme(plot.title = element_text(hjust=0.5, face="bold"), legend.position = 'none') +
       ggtitle("nFeature Distribution")
     p.density2 <- ggplot(qc_df, aes(x=nCount_RNA, color=orig.ident, fill=orig.ident, group=orig.ident)) + 
@@ -160,7 +160,7 @@ all_sample_qc_plots <- function(obj_list, order, custom_cols, cell_count=F, nFea
       scale_x_log10(labels = label_comma()) +
       scale_fill_manual(values = custom_cols) +
       scale_color_manual(values = custom_cols) +
-      geom_vline(xintercept = 15,color="red",linetype="dotted") +
+      geom_vline(xintercept = 12,color="red",linetype="dotted") +
       theme(plot.title = element_text(hjust=0.5, face="bold")) +
       ggtitle("MT % Expression") +
       guides(color = guide_legend(title = "Sample"),
@@ -190,8 +190,47 @@ filter_out_cells <- function(seu.obj, feature_min=NULL, count_min=NULL, mt_thres
   print(glue::glue("Cells removed from {sample_id} : {total}"))
   
   return(seu.obj)
+  
 }
 
+
+# ==============================================================================
+# Plot proportion of cells filtered
+# ==============================================================================
+plot_filtered_cell_prop <- function(filtering_df, resDir) {
+  
+  plot_df <- rbind(data.frame(sample = filtering_df$sample, status = "Filtered", cells = filtering_df$raw - df$filtered),
+                   data.frame(sample = filtering_df$sample, status = "Retained", cells = filtering_df$filtered))
+
+  plot_df$treatment <- ifelse(plot_df$sample %in% c("trike_01_pretx", "trike_02_pretx"), "PreTx", "Post TriKE")
+  plot_df$treatment <- factor(plot_df$treatment, levels = c("PreTx", "Post TriKE"))
+  
+  label_df <- plot_df %>% group_by(sample, treatment) %>%
+    summarise(total = sum(cells), pct = sum(cells[status=="Retained"])/total*100, .groups="drop")
+  
+  p <- ggplot(plot_df, aes(sample, cells, fill = status)) +
+    geom_col() +
+    geom_text(data = label_df, aes(sample, total, label = paste0(round(pct), "%")), vjust = -0.5, size=3, inherit.aes = FALSE) +
+    facet_grid(~ treatment, scales = "free_x", space = "free_x", switch = "x") +
+    scale_fill_manual(values = c(
+      Retained = "#305395FF",
+      Filtered = "#62AFD7FF"
+    )) +
+    scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.1))) +
+    labs(x = NULL, y = "Cell Count", fill = NULL) +
+    theme_classic() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title.y = element_text(face='bold'),
+      strip.background = ggh4x::element_part_rect(side = "t", colour = "black", linewidth = 0.5),
+      strip.placement = "outside",
+      strip.text = element_text(face = "bold", margin = margin(t = 4)),
+      panel.spacing = unit(0.5, "lines"))
+  ggsave(filename=glue::glue("{resDir}cell_filtering_barplot.png"), plot=p, dpi=400, height=5, width=6)
+  
+  return(p)
+}
+   
 # ==============================================================================
 # Get doublets
 # ==============================================================================
@@ -265,6 +304,71 @@ run_standard_clustering <- function(seu.obj, resDir, n_pcs, elbow_plot=NULL) {
 }
 
 # ==============================================================================
+# Prettier UMAPs
+# ==============================================================================
+prettierDimPlot <- function(seu.obj, group.by=NULl, cols=NULL, reduction=NULL, title=NULL, box_labels=F, save_fig=NULL, file_name=NULL, resDir=NULL) {
+  
+  if (box_labels) {
+    # Initial plot
+    p <- DimPlot(seu.obj, group.by=group.by, cols=cols, pt.size=0.01, reduction=reduction, repel=T, label.size = 2.5, label=T, label.box=T) + NoLegend() +
+      ggtitle(title)
+
+    # White backgrounds
+    label_idx <- which(sapply(p$layers, function(l) inherits(l$geom, "GeomLabelRepel") || inherits(l$geom, "GeomLabel")))
+    p$layers[[label_idx]]$aes_params$fill <- "white"
+
+    # Cleaner formatting
+    p1 <- formatUMAP(p, smallAxes = T)
+
+    # Save
+    if (save_fig) {
+    ggsave(paste0(resDir, file_name), plot=p1, dpi=400, height=7, width=8)
+    } else {
+      return(p1)
+    }
+    
+    
+    } else {
+      # Plot
+      p <- DimPlot(seu.obj, group.by=group.by, cols=cols, pt.size = 0.01, reduction=reduction) +  ggtitle(title)
+      
+      # Cleaner formatting
+      p1 <- formatUMAP(p, smallAxes = T)
+      
+      # Save
+      if (save_fig) {
+        ggsave(paste0(resDir, file_name), plot=p1, dpi=400, height=7, width=8)
+      } else {
+        return(p1)
+      }
+      
+  }
+}
+
+
+# ==============================================================================
+# Prettier FeaturePlots
+# ==============================================================================
+prettierFeatPlot <- function(seu.obj, features=NULl, reduction=NULL, ncol=NULL, save_fig=NULL, file_name=NULL, resDir=NULL, height=7, width=8) {
+  
+    # Initial plot
+    p <- FeaturePlot(seu.obj, features = features, reduction=reduction, ncol = ncol, combine = FALSE)
+    p <- lapply(p, function(x) x + scale_colour_gradient(low = "lightgrey", high = "red3"))
+    # Cleaner formatting
+    p <- lapply(p, function(x) {formatUMAP(x, smallAxes = F)})
+    
+    p1 <- wrap_plots(p, ncol = ncol)
+  
+    
+    # Save
+    if (save_fig) {
+      ggsave(paste0(resDir, file_name), plot=p1, dpi=400, height=height, width=width)
+    } else {
+      return(p1)
+    }
+}
+  
+# ==============================================================================
 # Prettier UMAPs & VolcanoPlots
 # ==============================================================================
 
@@ -273,16 +377,13 @@ run_standard_clustering <- function(seu.obj, resDir, n_pcs, elbow_plot=NULL) {
 
 formatUMAP <- function(plot = NULL, smallAxes = F) {
   
-  plot <- plot + labs(x = "UMAP1", y = "UMAP2") +
+  plot <- plot + labs(x = "", y = "") +
     theme(axis.text = element_blank(), 
           axis.ticks = element_blank(),
           axis.title = element_text(size= 20),
-          plot.title = element_blank(),
+          #plot.title = element_blank(),
           title = element_text(size= 20),
-          axis.line = element_blank(),
-          panel.border = element_rect(color = "black",
-                                      fill = NA,
-                                      size = 2)
+          axis.line = element_blank()
     )
   
   if(smallAxes){

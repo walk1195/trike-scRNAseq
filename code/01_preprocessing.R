@@ -74,6 +74,10 @@ for (i in 1:length(sample_ids)) {
   objects[[new_sample_id]] <- s1
 }
 
+# Export list of initial cell counts
+filtering_df <- data.frame(sample = names(objects), raw = sapply(objects, ncol),
+  filtered = as.integer(table(s1$orig.ident)[names(objects)]))
+write.table(filtering_df, file=glue::glue('{resDir}qc_cell_counts.txt'), row.names=T, col.names=T,quote=F)
 
 # ------------------------------------------------------------------------------
 # Generate QC plots for each sample
@@ -101,12 +105,15 @@ custom_order <- c('trike_01_pretx', 'trike_01_2w', 'trike_02_pretx', 'trike_02_2
 # Plot
 all_sample_qc_plots(objects, order=custom_order, custom_cols=sampleCols, cell_count=T, nFeat=T, nCount=T, mt=T, density=T)
 
+# Replot 
+all_sample_qc_plots(objects, order=custom_order, custom_cols=sampleCols, density=T)
+
 # ------------------------------------------------------------------------------
 # Filter each dataset
 # ------------------------------------------------------------------------------
-feature_min = 350
+feature_min = 650
 count_min = 1000
-mt_threshold = 15
+mt_threshold = 12
 
 for (i in 1:length(objects)) {
   # Get obj
@@ -172,6 +179,43 @@ s1.merged <- merge(x = objects[[1]], y = objects[-1], add.cell.ids = names(objec
 ########### Save progress ###########
 
 saveRDS(s1.merged, file=glue::glue("{objDir}merged_object.rds"))
+
+# ------------------------------------------------------------------------------
+# More stringent cell filtering
+# ------------------------------------------------------------------------------
+# Create subdir if refiltering
+resDir <- glue::glue("{resDir}secondpass/")
+dir.create(resDir)
+
+feature_min = 650
+count_min = 1000
+mt_threshold = 12
+
+
+# Plot density
+
+
+for (i in 1:length(objects)) {
+  # Get obj
+  s1 <- objects[[i]]
+  sample_id <- names(objects)[i]
+  
+  # Prefilter count
+  prefilter_count = length(Cells(s1))
+  
+  # Filter obj
+  s1@meta.data$keep <- with(s1@meta.data, ifelse(nFeature_RNA > feature_min & nCount_RNA > count_min & percent.mt < mt_threshold, TRUE, FALSE))
+  s1 <- subset(s1, subset = keep == TRUE)
+  
+  # Post filter count
+  postfilter_count = length(Cells(s1))
+  
+  total = prefilter_count - postfilter_count
+  print(glue::glue("Cells removed from {sample_id} : {total}"))
+  
+  # Save
+  saveRDS(s1, glue::glue("{objDir}{sample_id}_filtered.rds"))
+}
 
 ########### Session info ###########
 sessionInfo()

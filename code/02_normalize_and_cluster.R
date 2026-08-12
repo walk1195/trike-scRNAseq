@@ -118,37 +118,102 @@ s1 <- s1 %>%
   FindNeighbors(dims = 1:30, reduction='harmony') %>%
   RunUMAP(dims = 1:30, reduction='harmony', reduction.name='umap.harmony')
 
-### Sample ID UMAP
-p <- DimPlot(s1, group.by='orig.ident', cols=sampleCols, pt.size=0.01, reduction='umap.harmony')
-formatUMAP(p, smallAxes = T)
-ggsave(paste0(resDir, 'umap_by_sample_integrated.png'), plot=p1, dpi=400, height=7, width=8)
-ggsave(paste0(resDir, 'umap_by_sample_unintegrated.png'), plot=p1, dpi=400, height=7, width=8)
 
-### Cell types
-p <- DimPlot(s1, group.by='blue_pruned', cols=encodeCols, pt.size=0.01, reduction='umap.harmony')
-formatUMAP(p, smallAxes = T)
+# ------------------------------------------------------------------------------
+# Plotting cluster results
+# ------------------------------------------------------------------------------
+resDir <- glue::glue("{resDir}firstpass/")
+dir.create(resDir)
 
-### nFeat, nCount, MT expr
-FeaturePlot(s1, features=c('nFeature_RNA', 'nCount_RNA', 'percent.mt' ), reduction='umap.harmony')
+############## UMAPs ###############
 
-### Doublet distribution
-p1 <- DimPlot(s1, group.by=c('scDblFinder.class'), reduction='umap.harmony')
+### By sample ID
+prettierDimPlot(s1, group.by='orig.ident', cols=sampleCols, reduction='umap.harmony', save_fig=T, title=NULL, file_name='umap_by_sample_integrated.png', resDir=resDir)
+
+### By cell types
+# Blue encode
+prettierDimPlot(s1, group.by='blue_pruned', cols=encodeCols, reduction='umap.harmony', box_labels = T,
+                save_fig=T, title='Blue Encode Annotations', file_name='umap_blue_encode_integrated.png', resDir=resDir)
+# Blue encode (unintegrated)
+prettierDimPlot(s1, group.by='blue_pruned', cols=encodeCols, box_labels = T,
+                save_fig=T, title='Blue Encode Annotations', file_name='umap_blue_encode.png', resDir=resDir)
+
+# Immgen
+prettierDimPlot(s1, group.by='immgen_pruned', cols=immgenCols, reduction='umap.harmony', box_labels=T,
+                save_fig=T, title='Immgen Annotations', file_name='umap_immgen_integrated.png', resDir=resDir)
+# Immgen (unintegrated)
+prettierDimPlot(s1, group.by='immgen_pruned', cols=immgenCols, box_labels=T,
+                save_fig=T, title='Immgen Annotations', file_name='umap_immgen.png', resDir=resDir)
+
+# HPCA main
+prettierDimPlot(s1, group.by='hpca_main_pruned', cols=hpca_mainCols, reduction='umap.harmony', save_fig=T, box_labels=T,
+                title='HPCA main Annotations', file_name='umap_hpca_main_integrated.png', resDir=resDir)
+# HPCA main (unintegrated)
+prettierDimPlot(s1, group.by='hpca_main_pruned', cols=hpca_mainCols, save_fig=T, box_labels=T,
+                title='HPCA main Annotations', file_name='umap_hpca_main.png', resDir=resDir)
+
+### By doublet calls
+prettierDimPlot(s1, group.by='scDblFinder.class', cols=doubletCols, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='doublets_integrated.png')
+prettierDimPlot(s1, group.by='scDblFinder.class', cols=doubletCols, save_fig=T, resDir=resDir, file_name='doublets.png')
+
+
+############## FeaturePlots ###############
+### QC metrics (integrated)
+prettierFeatPlot(s1, features='nFeature_RNA', reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='nFeature_integrated.png')
+prettierFeatPlot(s1, features='nCount_RNA', reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='nCount_integrated.png')
+prettierFeatPlot(s1, features='percent.mt', reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='MT_integrated.png')
+
+### QC metrics (unintegrated)
+prettierFeatPlot(s1, features='nFeature_RNA', save_fig=T, resDir=resDir, file_name='nFeature.png')
+prettierFeatPlot(s1, features='nCount_RNA', save_fig=T, resDir=resDir, file_name='nCount.png')
+prettierFeatPlot(s1, features='percent.mt', save_fig=T, resDir=resDir, file_name='MT.png')
 
 ### Cell type markers
-p2 <- FeaturePlot(s1, features='nFeature_RNA', reduction='umap.harmony')
-p1+p2
+resDir <- glue::glue("{resDir}marker_genes/")
+dir.create(resDir)
+
+# Markers of interest
+activation <- c('CD69', 'IL2RA', 'TNFRSF9')
+effector_cytokines <- c('IFNG', 'TNF', 'IL2')
+cytotoxicity <- c('GZMB', 'GZMA', 'NKG7', 'PRF1', 'CTSW', 'CCL4', 'CCL5')
+effector_mem <- c('CD44', 'CD27', 'IL7R', 'CD28')
+prolif <- c('MKI67', 'TOP2A', 'STMN1')
+signaling <- c('CD3D', 'CD3E')
+# Plot
+prettierFeatPlot(s1, features=activation, ncol=2, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='activation_genes.png')
+prettierFeatPlot(s1, features=effector_cytokines, ncol=2, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='effector_cyto_genes.png')
+prettierFeatPlot(s1, features=cytotoxicity, ncol=3, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='cytotoxicity_genes.png', height=10, width=12)
+prettierFeatPlot(s1, features=effector_mem, ncol=2, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='effector_mem_genes.png')
+prettierFeatPlot(s1, features=prolif, ncol=2, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='prolif_genes.png')
+prettierFeatPlot(s1, features=signaling, ncol=2, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='tcell_genes.png', height=4, width=8)
+
+#### Inspecting single gene cpms ----- TODO: we'll come back to this later to create a function that can grab cpms and plot them ###
+s1.joined <- JoinLayers(s1)
+counts <- GetAssayData(s1.joined, assay = "RNA", layer = "counts")
+
+# expr_df <- FetchData(s1, vars = c(gene, "orig.ident"))
+# 
+# ggplot(expr_df, aes(x = orig.ident, y = .data[[gene]])) +
+#   geom_boxplot(outlier.size = 0.3) +
+#   labs(x = NULL, y = paste0(gene, " expression")) +
+#   theme_classic()
+
+gene <- 'KLF2'
+cpm <- counts[gene, ] / Matrix::colSums(counts) * 1e6
+
+cpm_df <- data.frame(sample = s1$orig.ident, cpm = as.numeric(cpm)) |>
+  dplyr::filter(cpm > 0)
 
 
-# Integration
-s1 <- IntegrateLayers(object = s1, method = HarmonyIntegration, orig.reduction = "pca",
-                       new.reduction = "harmony", verbose = FALSE)
+ggplot(cpm_df, aes(x = sample, y = cpm)) +
+  geom_boxplot(outlier.size = 0.3) +
+  labs(x = NULL, y = paste0(gene, " CPM")) +
+  theme_classic()
 
 ############################################################################################
 # TODO:
 
 # (1) Clustering iterations:
-    ### Initial first pass w/ default values
-        
 
     ### More stringent cell filtering
     
@@ -162,7 +227,6 @@ s1 <- IntegrateLayers(object = s1, method = HarmonyIntegration, orig.reduction =
     ### Integrated dataset -- will not influence diff expr; just clustering & visualization
 
 
-
 # For each of these iterations, we want to save the following plots to a unique folder:
   # - UMAP by sample (orig.ident)
   # - FeaturePlot by nFeature, nCount, mt ***customize color and axes
@@ -171,8 +235,6 @@ s1 <- IntegrateLayers(object = s1, method = HarmonyIntegration, orig.reduction =
 # (2) Run SingleR using Ammons reference
 
 ############################################################################################
-
-FeaturePlot(s1, features='CD3E')
 
 ### PCA, UMAP, & clustering
 
@@ -253,22 +315,6 @@ message("Clustering finished. Saving progress...")
 saveRDS(s1, paste0(objDir, sample_id, '.rds'))
 message("Clustered object saved.")
 
-
-########################################################################
-#           QC Plots -- Post Clustering
-########################################################################
-message("Generating QC plots after clustering...")
-
-setwd(resDir)
-
-FeaturePlot(s1, features='nFeature_RNA')
-ggsave(paste('umap_nFeature.png', sep=""), width = 6, height = 5, dpi=400)
-
-FeaturePlot(s1, features='nCount_RNA')
-ggsave(paste('umap_nCount.png', sep=""), width = 6, height = 5, dpi=400)
-
-FeaturePlot(s1, features='percent.mt')
-ggsave(paste('umap_mt.png', sep=""), width = 6, height = 5, dpi=400)
 
 
 
