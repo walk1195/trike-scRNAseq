@@ -106,14 +106,14 @@ custom_order <- c('trike_01_pretx', 'trike_01_2w', 'trike_02_pretx', 'trike_02_2
 all_sample_qc_plots(objects, order=custom_order, custom_cols=sampleCols, cell_count=T, nFeat=T, nCount=T, mt=T, density=T)
 
 # Replot 
-all_sample_qc_plots(objects, order=custom_order, custom_cols=sampleCols, density=T)
+all_sample_qc_plots(objects, order=custom_order, custom_cols=sampleCols, density=T, resDir=resDir)
 
 # ------------------------------------------------------------------------------
 # Filter each dataset
 # ------------------------------------------------------------------------------
-feature_min = 650
+feature_min = 350
 count_min = 1000
-mt_threshold = 12
+mt_threshold = 15
 
 for (i in 1:length(objects)) {
   # Get obj
@@ -191,31 +191,27 @@ feature_min = 650
 count_min = 1000
 mt_threshold = 12
 
+# Replot density plots
+all_sample_qc_plots(objects, order=custom_order, custom_cols=sampleCols, density=T, resDir=resDir)
 
-# Plot density
+# We can just filter the merged object now
+s1@meta.data$keep <- with(s1@meta.data, ifelse(nFeature_RNA > feature_min & nCount_RNA > count_min & percent.mt < mt_threshold, TRUE, FALSE))
 
+### Subset by more stringent thresholds
+prefilter_count = length(Cells(s1))
+s1 <- subset(s1, subset = keep == TRUE)
+postfilter_count = length(Cells(s1))
 
-for (i in 1:length(objects)) {
-  # Get obj
-  s1 <- objects[[i]]
-  sample_id <- names(objects)[i]
-  
-  # Prefilter count
-  prefilter_count = length(Cells(s1))
-  
-  # Filter obj
-  s1@meta.data$keep <- with(s1@meta.data, ifelse(nFeature_RNA > feature_min & nCount_RNA > count_min & percent.mt < mt_threshold, TRUE, FALSE))
-  s1 <- subset(s1, subset = keep == TRUE)
-  
-  # Post filter count
-  postfilter_count = length(Cells(s1))
-  
-  total = prefilter_count - postfilter_count
-  print(glue::glue("Cells removed from {sample_id} : {total}"))
-  
-  # Save
-  saveRDS(s1, glue::glue("{objDir}{sample_id}_filtered.rds"))
-}
+total = prefilter_count - postfilter_count
+print(glue::glue("Cells removed from {sample_id} : {total}"))
+
+### Also removing doublets
+prefilter_count = length(Cells(s1))
+s1 <- subset(s1, subset = scDblFinder.class == 'singlet')
+postfilter_count = length(Cells(s1))
+total = prefilter_count - postfilter_count
+print(glue::glue("Cells removed from {sample_id} : {total}"))
+
 
 ########### Session info ###########
 sessionInfo()

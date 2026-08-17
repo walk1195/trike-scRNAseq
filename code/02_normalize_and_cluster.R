@@ -9,6 +9,13 @@
 #############################################################################################
 #############################################################################################
 
+# -------------------------------------------------------------------------------------------
+# TODO:
+# (1) Inspect cluster markers of suspicious cell clusters at various resolutions
+
+# (2) Inspect result of changing n_pc parameter
+# -------------------------------------------------------------------------------------------
+
 # Set up environment
 # -------------------------------------------------------------------------------------------
 
@@ -84,12 +91,11 @@ s1 <- readRDS(file=glue::glue("{objDir}merged_object.rds"))
 ### Using the median raw count depth of the dataset
 
 # Log normalization -- this is performed on cell-by-cell basis, so having independent counts layers doesn't matter
-s1 <- NormalizeData(s1, normalization.method = "LogNormalize", scale.factor = median(s1$nCount_RNA)) # Scale by the median total UMI per cell = 8691
+s1 <- NormalizeData(s1, normalization.method = "LogNormalize", scale.factor = median(s1$nCount_RNA)) # Scale by the median total UMI per cell = 8691 (first pass), 8366 (second pass)
 
 # Join layers
-s1 <- JoinLayer(s1)
-
-s1[["RNA"]] <- split(s1[["RNA"]], f = s1$orig.ident)
+#s1 <- JoinLayer(s1)
+#s1[["RNA"]] <- split(s1[["RNA"]], f = s1$orig.ident)
 
 ############################################################################################
 # Variable Features
@@ -109,9 +115,16 @@ s1 <- s1 %>%
 p <- ElbowPlot(s1, ndims = 50)
 ggsave(file=glue::glue("{resDir}elbow_plot.png"), plot=p, dpi=400, height=5, width=6)
 
+# Neighbors & UMAP
+s1 <- s1 %>%
+  FindNeighbors(dims = 1:30) %>%
+  RunUMAP(dims = 1:30)
+
+
+####### Integration ########
 # Run integration
 s1 <- IntegrateLayers(object = s1, method = HarmonyIntegration, orig.reduction = "pca",
-                       new.reduction = "harmony", verbose = FALSE)
+                       new.reduction = "harmony", verbose = TRUE)
 
 # Neighbors & UMAP
 s1 <- s1 %>%
@@ -122,13 +135,16 @@ s1 <- s1 %>%
 # ------------------------------------------------------------------------------
 # Plotting cluster results
 # ------------------------------------------------------------------------------
-resDir <- glue::glue("{resDir}firstpass/")
+resDir <- glue::glue("{resDir}thirdpass/")
 dir.create(resDir)
 
 ############## UMAPs ###############
 
 ### By sample ID
 prettierDimPlot(s1, group.by='orig.ident', cols=sampleCols, reduction='umap.harmony', save_fig=T, title=NULL, file_name='umap_by_sample_integrated.png', resDir=resDir)
+
+prettierDimPlot(s1, group.by='orig.ident', cols=sampleCols, save_fig=F, title=NULL, file_name='umap_by_sample_unintegrated.png', resDir=resDir)
+
 
 ### By cell types
 # Blue encode
@@ -187,6 +203,63 @@ prettierFeatPlot(s1, features=effector_mem, ncol=2, reduction='umap.harmony', sa
 prettierFeatPlot(s1, features=prolif, ncol=2, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='prolif_genes.png')
 prettierFeatPlot(s1, features=signaling, ncol=2, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='tcell_genes.png', height=4, width=8)
 
+# ------------------------------------------------------------------------------
+# Inspecting cells < 1000 feats
+# ------------------------------------------------------------------------------
+s1$low_feat <- with(s1@meta.data, ifelse(nFeature_RNA < 1000, TRUE, FALSE))
+prettierDimPlot(s1, group.by='low_feat', cols=doubletCols, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='umap_low_feature_cells.png')
+
+prettierDimPlot(s1, group.by='orig.ident', split.by=T, cols=sampleCols, reduction='umap.harmony', save_fig=T, resDir=resDir, file_name='umap_split_by_sample.png', width=15)
+
+
+# ------------------------------------------------------------------------------
+# Clustering at different resolutions
+# ------------------------------------------------------------------------------
+resDir <- glue::glue("{resDir}umaps/")
+dir.create(resDir)
+
+# Grab custom cols to replace seurat default
+random_cols <- generate_color_vector(20, seed=10)
+
+resolutions = c(0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1)
+for (res in resolutions){
+  # Cluster
+  s1 <- FindClusters(s1, resolution=res, cluster.name=paste0('res',res))
+  # Plot UMAP
+  prettierDimPlot(s1, cols=random_cols, group.by=paste0('res',res), reduction = "umap.harmony", save_fig=T, resDir=resDir, file_name=paste0('res', res, '.png'))
+}
+
+# Clustree to choose resolution
+clusterings <- s1@meta.data
+clustree(clusterings, prefix = "res")
+ggsave(paste0(resDir, 'clustree_diagram.png'), width = 7, height = 9, dpi=400)
+
+
+# ------------------------------------------------------------------------------
+# TODO: Calculating cluster markers for a few resolutions 
+# ------------------------------------------------------------------------------
+
+
+
+
+# ------------------------------------------------------------------------------
+# TODO: Testing out a few different pc values
+# ------------------------------------------------------------------------------
+pc_iterations <- c(15,20,25,30)
+for (n_pcs in pc_iterations) {
+  # Neighbors
+  s1 <- FindNeighbors(s1, dims = 1:n_pcs)
+  # UMAP
+  s1 <- RunUMAP(s1, dims = 1:n_pcs) # only do this once
+  # Plot
+  DimPlot(s1, reduction = "umap", group.by = 'nFeature_RNA', alpha = 0.7) + ggtitle(glue::glue('{n_pcs} PCs'))
+  ggsave(paste0(n_pcs,'_pcs.png'), width = 6, height = 5, dpi=400)
+}
+
+
+# ------------------------------------------------------------------------------
+# TODO: inspect cpms of single genes
+# ------------------------------------------------------------------------------
 #### Inspecting single gene cpms ----- TODO: we'll come back to this later to create a function that can grab cpms and plot them ###
 s1.joined <- JoinLayers(s1)
 counts <- GetAssayData(s1.joined, assay = "RNA", layer = "counts")
@@ -210,155 +283,16 @@ ggplot(cpm_df, aes(x = sample, y = cpm)) +
   labs(x = NULL, y = paste0(gene, " CPM")) +
   theme_classic()
 
-############################################################################################
-# TODO:
-
-# (1) Clustering iterations:
-
-    ### More stringent cell filtering
-    
-    
-    ### Doublets removed
-
-    
-    ### Multiple n_pc values
 
 
-    ### Integrated dataset -- will not influence diff expr; just clustering & visualization
-
-
-# For each of these iterations, we want to save the following plots to a unique folder:
-  # - UMAP by sample (orig.ident)
-  # - FeaturePlot by nFeature, nCount, mt ***customize color and axes
-  # - Some cell type markers (CD3E, GZMA, ) ***customize color and axes
-
-# (2) Run SingleR using Ammons reference
-
-############################################################################################
-
-### PCA, UMAP, & clustering
-
-# If 50 or fewer cells...
-if (ncol(s1) <= 300) {
-  s1 <- RunPCA(s1, npcs = 15)
-  
-  # Elbow plot
-  ElbowPlot(s1, ndims = 15) # Elbow plot
-  ggsave('elbow_plot.png', width = 6, height = 5, dpi=400)
-  
-  # Neighbors
-  s1 <- FindNeighbors(s1, dims = 1:15)
-  # UMAP
-  s1 <- RunUMAP(s1, dims = 1:15) # only do this once
-  
-  # Clustering
-  resolutions = c(0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
-  for (res in resolutions){
-    # Cluster
-    s1 <- FindClusters(s1, resolution=res, cluster.name=paste0('res',res)) # Setting smallest resolution
-    # Plot UMAP
-    dir.create('umaps')
-    DimPlot(s1, reduction = "umap", group.by = paste0('res',res), alpha = 0.7)
-    ggsave(paste0('umaps/clusters_', res, '.png'), width = 6, height = 5, dpi=400)
-  }
-  
-  # Clustree to choose resolution
-  clusterings <- s1@meta.data
-  clustree(clusterings, prefix = "res")
-  ggsave(paste('clustree_diagram.png', sep=""), width = 7, height = 9, dpi=400)
-  
-  # If more than 50 cells...
-} else {
-  s1 <- RunPCA(s1)
-  
-  # Elbow plot
-  ElbowPlot(s1, ndims = 40) # Elbow plot
-  ggsave('elbow_plot.png', width = 6, height = 5, dpi=400)
-  
-  
-  pc_iterations <- c(15,20,25,30)
-  for (n_pcs in pc_iterations) {
-    # Neighbors
-    s1 <- FindNeighbors(s1, dims = 1:n_pcs)
-    # UMAP
-    s1 <- RunUMAP(s1, dims = 1:n_pcs) # only do this once
-    # Plot
-    DimPlot(s1, reduction = "umap", group.by = 'nFeature_RNA', alpha = 0.7) + ggtitle(glue::glue('{n_pcs} PCs'))
-    ggsave(paste0(n_pcs,'_pcs.png'), width = 6, height = 5, dpi=400)
-  }
-  
-  # Using 25 pcs as baseline
-  s1 <- FindNeighbors(s1, dims = 1:25)
-  s1 <- RunUMAP(s1, dims = 1:25) # only do this once
-  
-  # Clustering
-  resolutions = c(0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
-  for (res in resolutions){
-    # Cluster
-    s1 <- FindClusters(s1, resolution=res, cluster.name=paste0('res',res)) # Setting smallest resolution
-    # Plot UMAP
-    dir.create('umaps')
-    DimPlot(s1, reduction = "umap", group.by = paste0('res',res), alpha = 0.7)
-    ggsave(paste0('umaps/clusters_', res, '.png'), width = 6, height = 5, dpi=400)
-  }
-  
-  # Clustree to choose resolution
-  clusterings <- s1@meta.data
-  clustree(clusterings, prefix = "res")
-  ggsave(paste('clustree_diagram.png', sep=""), width = 7, height = 9, dpi=400)
-  
-}
-
-
-# Save progress
-message("Clustering finished. Saving progress...")
-saveRDS(s1, paste0(objDir, sample_id, '.rds'))
-message("Clustered object saved.")
-
-
-
-
-########################################################################
-#           Marker Gene Plots -- Post Clustering
-########################################################################
-dir.create(paste0(resDir, '/Marker_genes'))
-setwd(paste0(resDir, '/Marker_genes'))
-
-# -----------------------------------------------------------
-plot_features_safe <- function(obj, features, filename) {
-  # Keep only genes present in the object
-  valid_features <- features[features %in% rownames(obj)]
-  # Warn if some are missing
-  missing <- setdiff(features, valid_features)
-  if (length(missing) > 0) {
-    message("Missing genes: ", paste(missing, collapse = ", "))
-  }
-  # Skip if no valid genes
-  if (length(valid_features) == 0) {
-    message("No valid genes found. Skipping: ", filename)
-    return(NULL)
-  }
-  # -----------------------------------------------------------
-  
-  # Plot and save
-  p <- FeaturePlot(obj, features = valid_features)
-  ggsave(filename, plot = p, width = 6, height = 5, dpi = 400)
-}
-
-bcell_markers <- c('CD79A', 'CD79B', 'PAX5', 'CD19')
-plot_features_safe(s1, bcell_markers, "umap_bcell_markers.png")
-
-tcell_markers <- c('CD3E', 'CD3D', 'CD4', 'CD8A')
-plot_features_safe(s1, tcell_markers, "umap_tcell_markers.png")
-
-myeloid <- c('CD163', 'CD68', 'S100A8', 'CSF1R')
-plot_features_safe(s1, myeloid, "umap_myeloid_markers.png")
-
-prolif <- c('MKI67', 'TOP2A', 'CENPF','BUB1')
-plot_features_safe(s1, prolif, "umap_prolif_markers.png")
 
 ##### Save
+# firstpass object
 saveRDS(s1, file=glue::glue("{objDir}merged_object.rds"))
+
+# thirdpass object
+saveRDS(s1, file=glue::glue("{objDir}filtered_object.rds"))
+
 
 ##### Session info
 sessionInfo()

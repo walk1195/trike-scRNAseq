@@ -4,6 +4,7 @@
 library(scDblFinder)
 library(Seurat)
 library(tidyverse)
+library(patchwork)
 
 # ==============================================================================
 # QC Plots - per sample
@@ -306,7 +307,7 @@ run_standard_clustering <- function(seu.obj, resDir, n_pcs, elbow_plot=NULL) {
 # ==============================================================================
 # Prettier UMAPs
 # ==============================================================================
-prettierDimPlot <- function(seu.obj, group.by=NULl, cols=NULL, reduction=NULL, title=NULL, box_labels=F, save_fig=NULL, file_name=NULL, resDir=NULL) {
+prettierDimPlot <- function(seu.obj, group.by=NULl, split.by=NULL, cols=NULL, reduction=NULL, title=NULL, box_labels=F, save_fig=NULL, file_name=NULL, resDir=NULL, height=7, width=8) {
   
   if (box_labels) {
     # Initial plot
@@ -322,22 +323,24 @@ prettierDimPlot <- function(seu.obj, group.by=NULl, cols=NULL, reduction=NULL, t
 
     # Save
     if (save_fig) {
-    ggsave(paste0(resDir, file_name), plot=p1, dpi=400, height=7, width=8)
+    ggsave(paste0(resDir, file_name), plot=p1, dpi=400, height=height, width=width)
     } else {
       return(p1)
     }
     
     
     } else {
+      split <- if (isTRUE(split.by)) "orig.ident" else NULL
+      
       # Plot
-      p <- DimPlot(seu.obj, group.by=group.by, cols=cols, pt.size = 0.01, reduction=reduction) +  ggtitle(title)
+      p <- DimPlot(seu.obj, group.by=group.by, split.by=split, cols=cols, pt.size = 0.01, reduction=reduction) +  ggtitle(title)
       
       # Cleaner formatting
       p1 <- formatUMAP(p, smallAxes = T)
       
       # Save
       if (save_fig) {
-        ggsave(paste0(resDir, file_name), plot=p1, dpi=400, height=7, width=8)
+        ggsave(paste0(resDir, file_name), plot=p1, dpi=400, height=height, width=width)
       } else {
         return(p1)
       }
