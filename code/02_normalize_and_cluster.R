@@ -10,12 +10,6 @@
 #############################################################################################
 
 # -------------------------------------------------------------------------------------------
-# TODO:
-# (1) Inspect cluster markers of suspicious cell clusters at various resolutions
-
-# (2) Inspect result of changing n_pc parameter
-# -------------------------------------------------------------------------------------------
-
 # Set up environment
 # -------------------------------------------------------------------------------------------
 
@@ -24,7 +18,7 @@ library(tidyverse)
 library(Seurat)
 library(patchwork)
 library(scales)
-library(EnhancedVolcano)
+library(clustree)
 
 # Functions
 source("code/utils/functions.R")
@@ -52,7 +46,9 @@ if (!dir.exists(resDir)) {
 sample_ids <- readLines(paste0(projDir,'/inputs/samples.txt'))
 
 # Read in data
-s1 <- readRDS(file=glue::glue("{objDir}merged_object.rds"))
+#s1 <- readRDS(file=glue::glue("{objDir}merged_object.rds"))
+
+s1 <- readRDS(file=glue::glue("{objDir}filtered_object.rds"))
 
 # ------------------------------------------------------------------------------
 # Library-size normalization
@@ -236,54 +232,102 @@ ggsave(paste0(resDir, 'clustree_diagram.png'), width = 7, height = 9, dpi=400)
 
 
 # ------------------------------------------------------------------------------
-# TODO: Calculating cluster markers for a few resolutions 
+# Calculating cluster markers for a few resolutions 
 # ------------------------------------------------------------------------------
-
-
-
-
-# ------------------------------------------------------------------------------
-# TODO: Testing out a few different pc values
-# ------------------------------------------------------------------------------
-pc_iterations <- c(15,20,25,30)
-for (n_pcs in pc_iterations) {
-  # Neighbors
-  s1 <- FindNeighbors(s1, dims = 1:n_pcs)
-  # UMAP
-  s1 <- RunUMAP(s1, dims = 1:n_pcs) # only do this once
-  # Plot
-  DimPlot(s1, reduction = "umap", group.by = 'nFeature_RNA', alpha = 0.7) + ggtitle(glue::glue('{n_pcs} PCs'))
-  ggsave(paste0(n_pcs,'_pcs.png'), width = 6, height = 5, dpi=400)
-}
-
-
-# ------------------------------------------------------------------------------
-# TODO: inspect cpms of single genes
-# ------------------------------------------------------------------------------
-#### Inspecting single gene cpms ----- TODO: we'll come back to this later to create a function that can grab cpms and plot them ###
 s1.joined <- JoinLayers(s1)
-counts <- GetAssayData(s1.joined, assay = "RNA", layer = "counts")
 
-# expr_df <- FetchData(s1, vars = c(gene, "orig.ident"))
-# 
-# ggplot(expr_df, aes(x = orig.ident, y = .data[[gene]])) +
-#   geom_boxplot(outlier.size = 0.3) +
-#   labs(x = NULL, y = paste0(gene, " expression")) +
-#   theme_classic()
+# res0.08 = 12 clusters
+      # Choosing 0.08 resolution because cluster integrity appears maintained, while also including certain subpopulations appearing in Ammons
+      # Can drop to 0.06 if there is evidence of overclustering
 
-gene <- 'KLF2'
-cpm <- counts[gene, ] / Matrix::colSums(counts) * 1e6
+markers <- FindAllMarkers(s1.joined, group.by='res0.08', only.pos=T, min.pct=0.25)
 
-cpm_df <- data.frame(sample = s1$orig.ident, cpm = as.numeric(cpm)) |>
-  dplyr::filter(cpm > 0)
+# Subset to top 5 per cluster
+markers_top5 <- markers %>%
+  group_by(cluster) %>%
+  slice_max(order_by = avg_log2FC, n = 5)
+
+# Visualize
+DotPlot(s1, features = unique(markers_top5$gene),
+  group.by = "res0.08",
+  dot.scale = 6) +
+  scale_color_gradient(low = "lightgrey", high = "red") +
+  theme(axis.text=element_text(size=8)) +
+  RotatedAxis()
+ggsave(paste0(resDir, 'dotplot_top_markers_res0.08.png'), width = 10, height = 6, dpi=400)
+
+# Save markers list
+write.table(markers, file=paste0(resDir, 'markers_res0.08.tsv'), quote=F, sep='\t')
+
+# res0.06 = 11 clusters
+      # Inspecting for overclustering
+markers <- FindAllMarkers(s1.joined, group.by='res0.06', only.pos=T, min.pct=0.25)
+
+# Subset to top 5 per cluster
+markers_top5 <- markers %>%
+  group_by(cluster) %>%
+  slice_max(order_by = avg_log2FC, n = 5)
+
+# Visualize
+DotPlot(s1, features = unique(markers_top5$gene),
+        group.by = "res0.06",
+        dot.scale = 6) +
+  scale_color_gradient(low = "lightgrey", high = "red") +
+  theme(axis.text=element_text(size=8)) +
+  RotatedAxis()
+ggsave(paste0(resDir, 'dotplot_top_markers_res0.06.png'), width = 10, height = 6, dpi=400)
+
+# Save markers list
+write.table(markers, file=paste0(resDir, 'markers_res0.06.tsv'), quote=F, sep='\t')
 
 
-ggplot(cpm_df, aes(x = sample, y = cpm)) +
-  geom_boxplot(outlier.size = 0.3) +
-  labs(x = NULL, y = paste0(gene, " CPM")) +
+# res0.05 = 9 clusters
+# Inspecting for overclustering
+markers <- FindAllMarkers(s1.joined, group.by='res0.05', only.pos=T, min.pct=0.25)
+
+# Subset to top 5 per cluster
+markers_top5 <- markers %>%
+  group_by(cluster) %>%
+  slice_max(order_by = avg_log2FC, n = 5)
+
+# Visualize
+DotPlot(s1, features = unique(markers_top5$gene),
+        group.by = "res0.05",
+        dot.scale = 6) +
+  scale_color_gradient(low = "lightgrey", high = "red") +
+  theme(axis.text=element_text(size=8)) +
+  RotatedAxis()
+ggsave(paste0(resDir, 'dotplot_top_markers_res0.05.png'), width = 10, height = 6, dpi=400)
+
+# Save markers list
+write.table(markers, file=paste0(resDir, 'markers_res0.05.tsv'), quote=F, sep='\t')
+
+# ------------------------------------------------------------------------------
+# TODO: Plot sample proportions per cluster (stacked barchart)
+# ------------------------------------------------------------------------------
+
+# 0.08
+plot_df <- s1@meta.data %>% dplyr::count(res0.08, orig.ident) %>% group_by(res0.08) %>% mutate(prop = n/sum(n))
+
+ggplot(plot_df, aes(res0.08, prop, fill = orig.ident)) +
+  geom_col() +
+  scale_fill_manual(values=sampleCols) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Cluster", y = "Proportion of cells", fill = "Sample") +
   theme_classic()
+ggsave(paste0(resDir, 'cluster_proportion_by_sample_0.08.png'), width = 7, height = 6, dpi=400)
 
 
+# 0.06
+plot_df <- s1@meta.data %>% dplyr::count(res0.06, orig.ident) %>% group_by(res0.06) %>% mutate(prop = n/sum(n))
+
+ggplot(plot_df, aes(res0.06, prop, fill = orig.ident)) +
+  geom_col() +
+  scale_fill_manual(values=sampleCols) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Cluster", y = "Proportion of cells", fill = "Sample") +
+  theme_classic()
+ggsave(paste0(resDir, 'cluster_proportion_by_sample_0.06.png'), width = 7, height = 6, dpi=400)
 
 
 ##### Save

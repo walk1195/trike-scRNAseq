@@ -105,6 +105,35 @@ prettierDimPlot(s1, group.by = 'ammons.l2', reduction='umap.harmony', cols=ammon
 prettierDimPlot(s1, group.by = 'ammons.l2', reduction='umap.harmony', cols=ammonsCols.l2, save_fig = T, resDir=resDir, box_labels = F, width=10,
                 file_name = 'umap_ammons_l2_with_legend.png')
 
+# Barplot of contribution by sample
+plot_df <- s1@meta.data |>
+  dplyr::count(ammons.l1, orig.ident) |>
+  group_by(ammons.l1) |>
+  mutate(prop = n / sum(n))
+
+ggplot(plot_df, aes(x = ammons.l1, y = prop, fill = orig.ident)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = sampleCols) +
+  labs(x = NULL, y = "Relative contribution", fill = "Sample") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot_df <- as.data.frame(table(s1$ammons.l1, s1$orig.ident))
+colnames(plot_df) <- c("ammons.l1", "orig.ident", "n")
+plot_df$prop <- ave(plot_df$n, plot_df$orig.ident, FUN = function(x) x / sum(x))
+plot_df$orig.ident <- factor(plot_df$orig.ident, levels = c("trike_01_pretx", "trike_01_2w", "trike_02_pretx", "trike_02_2w"))
+
+ggplot(plot_df, aes(x = orig.ident, y = prop, fill = ammons.l1)) +
+  geom_col() +
+  theme_classic() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = ammonsCols.l1) +
+  theme(axis.text = element_text(size=12), axis.title=element_text(size=14, face='bold'), legend.text = element_text(size=12),
+        axis.text.x = element_text(angle=45, size=10, hjust=1)) +
+  labs(x = NULL, y = "Cell type composition", fill = NULL)
+ggsave(paste0(resDir, 'ammons_l1_proportions_barplot.png'), dpi=400, height=6, width=8)
+
 # ------------------------------------------------------------------------------
 # Save
 # ------------------------------------------------------------------------------

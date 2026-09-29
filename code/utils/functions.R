@@ -5,6 +5,7 @@ library(scDblFinder)
 library(Seurat)
 library(tidyverse)
 library(patchwork)
+library(ggrepel)
 
 # ==============================================================================
 # QC Plots - per sample
@@ -436,60 +437,90 @@ formatUMAP <- function(plot = NULL, smallAxes = F) {
 
 
 ############ prettyVolc ############                                          
-prettyVolc <- function(plot = NULL, rightLab = NULL, leftLab = NULL, rightCol = "red", leftCol = "blue", arrowz = T
-){
+
+prettierVolc_old <- function(markers, title = NULL, fc_cutoff = 0.6, p_cutoff = 0.05, n_labels = 40,
+                         left_lab = NULL, right_lab = NULL, pre_col = "#377EB8", post_col = "#E41A1C") {
+  markers$gene <- rownames(markers)
+  markers$group <- ifelse(markers$avg_log2FC < -fc_cutoff & markers$p_val_adj < p_cutoff, "PreTx",
+                          ifelse(markers$avg_log2FC > fc_cutoff & markers$p_val_adj < p_cutoff, "PostTx", "NS"))
+  markers$neglog10p <- -log10(markers$p_val_adj)
+  markers$neglog10p[is.infinite(markers$neglog10p)] <- max(markers$neglog10p[is.finite(markers$neglog10p)]) + 1
+  label_genes <- markers[markers$group != "NS", ] |> dplyr::arrange(p_val_adj) |> head(n_labels)
   
-  p <- plot + scale_x_symmetric(mid = 0) + theme(legend.position = c(0.10, 0.9),
-                                                 legend.background = element_blank(),
-                                                 legend.key = element_blank(),
-                                                 axis.title = element_text(size = 16),
-                                                 axis.text = element_text(size = 12),
-                                                 panel.grid.major = element_blank(),
-                                                 panel.grid.minor = element_blank(),
-                                                 panel.border = element_blank(),
-                                                 panel.background = element_blank(),
-                                                 axis.line = element_line(color="black"),
-                                                 plot.title = element_blank()
-  ) + 
-    {if(arrowz){
-      annotate("segment", x = 0.58*1.5, 
-               y = ggplot_build(plot)$layout$panel_scales_y[[1]]$range$range[2]*1.06, 
-               xend = c(max(abs(plot$data$log2FoldChange)),-max(abs(plot$data$log2FoldChange)))[1], 
-               yend = ggplot_build(plot)$layout$panel_scales_y[[1]]$range$range[2]*1.06, 
-               lineend = "round", linejoin = "bevel", linetype ="solid", colour = rightCol,
-               size = 1, arrow = arrow(length = unit(0.1, "inches"))
-      ) 
-    }} +
-    {if(arrowz){
-      annotate("segment", x = -0.58*1.5, 
-               y = ggplot_build(plot)$layout$panel_scales_y[[1]]$range$range[2]*1.06, 
-               xend = c(max(abs(plot$data$log2FoldChange)),-max(abs(plot$data$log2FoldChange)))[2],
-               yend = ggplot_build(plot)$layout$panel_scales_y[[1]]$range$range[2]*1.06, 
-               lineend = "round", linejoin = "bevel", linetype ="solid", colour = leftCol,
-               size = 1, arrow = arrow(length = unit(0.1, "inches"))
-      )
-    }} + 
-    {if(!is.null(rightLab)){
-      annotate(geom = "text", x = (max(abs(plot$data$log2FoldChange))-0.58*1.5)/2+0.58*1.5, 
-               y = ggplot_build(plot)$layout$panel_scales_y[[1]]$range$range[2]*1.09,
-               label = rightLab,
-               hjust = 0.5,
-               size = 5)
-    }} + 
-    {if(!is.null(leftLab)){
-      annotate(geom = "text", x = -(max(abs(plot$data$log2FoldChange))-0.58*1.5)/2-0.58*1.5, 
-               y = ggplot_build(plot)$layout$panel_scales_y[[1]]$range$range[2]*1.09,
-               label = leftLab,
-               hjust = 0.5,
-               size = 5)
-    }} 
+  y_max   <- max(markers$neglog10p, na.rm = TRUE)
+  box_h   <- 0.05 * y_max
+  y_top   <- y_max * 1.15
+  y_upper <- y_top + box_h
   
-  return(p)
+  ggplot(markers, aes(x = avg_log2FC, y = neglog10p)) +
+    geom_point(data = subset(markers, group == "NS"), color = "grey70", size = 2) +
+    geom_point(data = subset(markers, group != "NS"), aes(color = group), size = 2.5) +
+    geom_text_repel(data = label_genes, aes(label = gene, color = group), size = 3.5, max.overlaps = n_labels) +
+    # bottom label bars
+    geom_rect(data = data.frame(xmin = -4, xmax = 0, ymin = -box_h, ymax = 0),
+              aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+              fill = pre_col, color = NA, inherit.aes = FALSE) +
+    geom_rect(data = data.frame(xmin = 0, xmax = 4, ymin = -box_h, ymax = 0),
+              aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+              fill = post_col, color = NA, inherit.aes = FALSE) +
+    # title box
+    geom_rect(data = data.frame(xmin = -4, xmax = 4, ymin = y_top, ymax = y_upper),
+              aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+              fill = "white", color = "black", inherit.aes = FALSE) +
+    annotate("text", x = 0, y = y_top + box_h / 2, label = title, fontface = "bold", size = 5) +
+    annotate("text", x = -2, y = -box_h / 2, label = left_lab, color = "white", fontface = "bold", size = 4) +
+    annotate("text", x = 2,  y = -box_h / 2, label = right_lab, color = "white", fontface = "bold", size = 4) +
+    scale_color_manual(values = c(PreTx = pre_col, PostTx = post_col)) +
+    annotate("segment", x = c(-fc_cutoff, fc_cutoff), xend = c(-fc_cutoff, fc_cutoff), y = -box_h, yend = y_top, linetype = "dashed", color = "grey60") +
+    geom_hline(yintercept = -log10(p_cutoff), linetype = "dashed", color = "grey60") +
+    scale_x_continuous(limits = c(-4, 4), expand = c(0, 0)) +
+    coord_cartesian(xlim = c(-4, 4), ylim = c(-box_h, y_upper), expand = FALSE, clip = "off") +
+    labs(x = "log2FC", y = "-log10(pval_adj)", color = NULL) +
+    theme_classic() +
+    theme(legend.position = "none", plot.margin = margin(10, 10, 25, 10), axis.title=element_text(face='bold'))
 }
 
-
-
-
+prettierVolc <- function(markers, title = NULL, fc_cutoff = 0.6, p_cutoff = 0.05, n_labels = 40, left_lab = NULL, right_lab = NULL,
+                         left_col = "#377EB8", right_col = "#E41A1C") {
+  
+  markers$gene <- rownames(markers)
+  markers$fc <- if ("avg_log2FC" %in% names(markers)) markers$avg_log2FC else markers$log2FoldChange
+  markers$p <- if ("p_val_adj" %in% names(markers)) markers$p_val_adj else markers$padj
+  
+  markers$group <- ifelse(markers$fc < -fc_cutoff & markers$p < p_cutoff, left_lab,
+                          ifelse(markers$fc > fc_cutoff & markers$p < p_cutoff, right_lab, "NS"))
+  markers$neglog10p <- -log10(markers$p)
+  markers$neglog10p[is.infinite(markers$neglog10p)] <- max(markers$neglog10p[is.finite(markers$neglog10p)]) + 1
+  
+  label_genes <- markers[markers$group != "NS", ] |> dplyr::arrange(p) |> head(n_labels)
+  y_max <- max(markers$neglog10p, na.rm = TRUE)
+  box_h <- 0.05 * y_max
+  y_top <- y_max * 1.15
+  
+  ggplot(markers, aes(fc, neglog10p)) +
+    geom_point(data = subset(markers, group == "NS"), color = "grey70", size = 2) +
+    geom_point(data = subset(markers, group != "NS"), aes(color = group), size = 2.5) +
+    geom_text_repel(data = label_genes, aes(label = gene, color = group), size = 3.5, max.overlaps = n_labels) +
+    geom_rect(data = data.frame(xmin = c(-4, 0), xmax = c(0, 4), ymin = -box_h, ymax = 0),
+              aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+              fill = c(left_col, right_col), color = NA, inherit.aes = FALSE) +
+    geom_rect(data = data.frame(xmin = -4, xmax = 4, ymin = y_top, ymax = y_top + box_h),
+              aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+              fill = "white", color = "black", inherit.aes = FALSE) +
+    annotate("text", x = 0, y = y_top + box_h / 2, label = title, fontface = "bold", size = 5) +
+    annotate("text", x = -2, y = -box_h / 2, label = left_lab, color = "white", fontface = "bold", size = 4, parse = FALSE) +
+    annotate("text", x = 2, y = -box_h / 2, label = right_lab, color = "white", fontface = "bold", size = 4, parse = FALSE) +
+    scale_color_manual(values = c(setNames(left_col, left_lab), setNames(right_col, right_lab))) +
+    annotate("segment", x = c(-fc_cutoff, fc_cutoff), xend = c(-fc_cutoff, fc_cutoff),
+             y = 0, yend = y_top, linetype = "dashed", color = "grey60") +
+    geom_hline(yintercept = -log10(p_cutoff), linetype = "dashed", color = "grey60") +
+    scale_x_continuous(limits = c(-4, 4), expand = c(0, 0)) +
+    coord_cartesian(xlim = c(-4, 4), ylim = c(-box_h, y_top + box_h), expand = FALSE, clip = "off") +
+    labs(x = "log2FC", y = "-log10(pval_adj)", color = NULL) +
+    theme_classic() +
+    theme(legend.position = "none", plot.margin = margin(10, 10, 25, 10),
+          axis.title = element_text(face = "bold"))
+}
 
 
 # Testing this function from the Ammons repo
@@ -624,6 +655,31 @@ prettyFeats <- function(seu.obj = NULL, nrow = 3, ncol = NULL, features = "", co
 #   
 # }
 
+# ------------------------------------------------------------------------------
+# TODO: inspect cpms of single genes
+# ------------------------------------------------------------------------------
+#### Inspecting single gene cpms ----- TODO: we'll come back to this later to create a function that can grab cpms and plot them ###
+s1.joined <- JoinLayers(s1)
+counts <- GetAssayData(s1.joined, assay = "RNA", layer = "counts")
+
+# expr_df <- FetchData(s1, vars = c(gene, "orig.ident"))
+# 
+# ggplot(expr_df, aes(x = orig.ident, y = .data[[gene]])) +
+#   geom_boxplot(outlier.size = 0.3) +
+#   labs(x = NULL, y = paste0(gene, " expression")) +
+#   theme_classic()
+
+gene <- 'KLF2'
+cpm <- counts[gene, ] / Matrix::colSums(counts) * 1e6
+
+cpm_df <- data.frame(sample = s1$orig.ident, cpm = as.numeric(cpm)) |>
+  dplyr::filter(cpm > 0)
+
+
+ggplot(cpm_df, aes(x = sample, y = cpm)) +
+  geom_boxplot(outlier.size = 0.3) +
+  labs(x = NULL, y = paste0(gene, " CPM")) +
+  theme_classic()
 
 
 
