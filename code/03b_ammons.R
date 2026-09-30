@@ -119,6 +119,7 @@ ggplot(plot_df, aes(x = ammons.l1, y = prop, fill = orig.ident)) +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
+
 plot_df <- as.data.frame(table(s1$ammons.l1, s1$orig.ident))
 colnames(plot_df) <- c("ammons.l1", "orig.ident", "n")
 plot_df$prop <- ave(plot_df$n, plot_df$orig.ident, FUN = function(x) x / sum(x))
@@ -133,6 +134,36 @@ ggplot(plot_df, aes(x = orig.ident, y = prop, fill = ammons.l1)) +
         axis.text.x = element_text(angle=45, size=10, hjust=1)) +
   labs(x = NULL, y = "Cell type composition", fill = NULL)
 ggsave(paste0(resDir, 'ammons_l1_proportions_barplot.png'), dpi=400, height=6, width=8)
+
+
+#### paired
+plot_df <- as.data.frame(table(s1$ammons.l1, s1$orig.ident))
+colnames(plot_df) <- c("ammons.l1", "orig.ident", "n")
+plot_df$prop <- ave(plot_df$n, plot_df$orig.ident, FUN = function(x) x / sum(x))
+
+# Get timpoint col
+plot_df$timepoint <- factor(sub("^.*_(pretx|2w)$", "\\1", plot_df$orig.ident), levels = c("pretx", "2w"))
+plot_df$timepoint <- factor(plot_df$timepoint, levels = c("pretx", "2w"), labels = c("PreTx", "2w"))
+
+# Fixing CD34+ label that's too big
+plot_df$ammons.l1 <- ifelse(as.character(plot_df$ammons.l1) == "CD34+ Unclassified",
+  "CD34+\nUnclassified", as.character(plot_df$ammons.l1))
+
+# Plot
+ggplot(plot_df, aes(x = timepoint, y = prop, group = dog, color = dog)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2.5) +
+  facet_wrap(~ammons.l1, ncol = 4) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values = c("trike_01" = "royalblue3", "trike_02" = "darkorange1")) +
+  theme_classic() +
+  theme(
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14, face = "bold"),
+    strip.text = element_text(size = 10.5, face = "bold"),
+    legend.text = element_text(size = 12)) +
+  labs(x = NULL, y = "Cell type proportion", color = "Dog")
+ggsave(paste0(resDir,'ammons_proportions_paired_dotplot.png'), dpi=400, height=5, width=7)
 
 # ------------------------------------------------------------------------------
 # Save

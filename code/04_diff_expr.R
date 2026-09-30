@@ -49,7 +49,7 @@ s1 <- readRDS(file=glue::glue("{objDir}filtered_object.rds"))
       # (1) CD16: targets NK/T cells
       # (2) IL15 (growth factor): stimulant for any cells expressing IL15R (B cells, T cells)
       # (3) Checkpoint molecule: tumor expression
-# Delivered subq, distributes to parmako state, if it sees a tumor it pulls T cells/NK cells to the tumor
+# Delivered sub-q, distributes to pharmaco state, if it sees a tumor it pulls T cells/NK cells to the tumor
 
 # We have 2 pretx samples, 2 posttx
 # We are interested in what is happening in the T cell compartment postx (compared to pretx). Specifically:
@@ -185,6 +185,8 @@ table(pseudo.s1$dog, pseudo.s1$condition)
 # Run paired DESeq2 for every cell type
       # We are asking whether, after accounting for differences in baseline expr levels across dogs (replicates), do we see
       # evidence of of gex changes Pre-TriKE to Post-TriKE?
+ct <- "CD8/NK cell"
+
 de_results <- lapply(unique(pseudo.s1$ammons.l1), function(ct) {
   # Grab samples per cell type 
   samples <- which(pseudo.s1$ammons.l1 == ct)
@@ -211,6 +213,60 @@ de_results <- lapply(unique(pseudo.s1$ammons.l1), function(ct) {
   res <- as.data.frame(results(dds, contrast = c("condition", "2w", "pretx")))
   res$gene <- rownames(res)
   res$cell_type <- ct
+  
+  
+  # Plot top 10 genes as a heatmap
+  # Top 10 genes by adjusted p-value
+  top_genes <- res |>
+    dplyr::filter(!is.na(padj), padj < 0.05, log2FoldChange > 0) |>
+    dplyr::arrange(padj) |>
+    dplyr::slice_head(n = 10) |>
+    dplyr::pull(gene)
+  
+  # For grabbing more top genes to plot
+  # top_genes <- res |>
+  #   dplyr::filter(!is.na(padj), padj < 0.05, log2FoldChange > 0) |>
+  #   dplyr::arrange(padj) |>
+  #   dplyr::slice_head(n = 20) |>
+  #   dplyr::pull(gene)
+  
+  if (length(top_genes) > 3) {
+    
+    # Normalized counts from the same full-gene DESeq2 object
+    mat <- counts(dds, normalized = TRUE)[top_genes, , drop = FALSE]
+    mat <- t(scale(t(log2(mat + 1))))
+    
+    # Fixing sample IDs and reordering for viz
+    colnames(mat) <- sub("_.*$", "", colnames(mat))
+    colnames(mat) <- gsub("-", "_", colnames(mat))
+    
+    mat <- mat[, c("trike_01_pretx", "trike_01_2w", "trike_02_pretx", "trike_02_2w")]
+    
+    print('Plotting heatmap.....')
+    # Unclustered samples
+    pheatmap::pheatmap(
+      mat,
+      #color = colorRampPalette(RColorBrewer::brewer.pal(9, "YlOrRd"))(100),
+      cluster_rows = TRUE,
+      cluster_cols = FALSE,
+      fontsize_row = 8,
+      main = ct,
+      filename = paste0(resDir, "heatmaps_sig_genes/heatmap_", gsub("[^A-Za-z0-9_-]", "_", ct), ".png"),
+      width = 6,
+      height = 6)
+  
+    # Clustering by sample
+    pheatmap::pheatmap(
+      mat,
+      #color = colorRampPalette(RColorBrewer::brewer.pal(9, "YlOrRd"))(100),
+      cluster_rows = TRUE,
+      cluster_cols = TRUE,
+      fontsize_row = 8,
+      main = ct,
+      filename = paste0(resDir, "heatmaps_sig_genes/heatmap_clustered_", gsub("[^A-Za-z0-9_-]", "_", ct), ".png"),
+      width = 6,
+      height = 6)
+  }
   
   res
 }) |> dplyr::bind_rows() # Combining all cell-type results into a single df
@@ -239,97 +295,6 @@ bulk_de_results <- de_results |>
   dplyr::filter(!is.na(padj)) |>
   dplyr::arrange(padj)
 
-
-# ------------------------------------------------------------------------------
-# (2) Inspecting some of the top DEGs from the CD8/NK group
-# ------------------------------------------------------------------------------
-
-de_results <- read.delim(paste0(resDir, "deseq2_results.tsv"))
-
-bulk_results_cd8 <- de_results |>
-  dplyr::filter(cell_type == 'CD8/NK cell') |>
-  dplyr::filter(!is.na(padj)) |>
-  dplyr::arrange(padj)
-
-bulk_results_cd8 <- de_results |>
-  dplyr::filter(cell_type == "CD8/NK cell", !is.na(padj)) |>
-  dplyr::arrange(padj, desc(log2FoldChange))
-
-genes <- head(bulk_results_cd8$gene, 6)
-
-VlnPlot(s1, features = genes,
-  group.by = "orig.ident",
-  idents = grep("CD8/NK cell_trike", levels(s1), value = TRUE))
-
-
-# INSPECTING GENE
-gene <- "CX3CR1"
-cbind(
-  sample = colnames(norm_counts),
-  dog = colData(dds)$dog,
-  condition = colData(dds)$condition,
-  count = norm_counts[gene, ]
-)
-de_results |>
-  dplyr::filter(cell_type == "CD8/NK cell", gene == "CX3CR1") |>
-  dplyr::select(gene, log2FoldChange, pvalue, padj)
-
-
-cd8 <- subset(s1, subset = ammons.l1 == "CD8/NK cell")
-genes <- head(bulk_results_cd8$gene, 6)
-
-counts <- GetAssayData(cd8, assay = "RNA", layer = "counts")
-cpm <- t(t(counts) / colSums(counts)) * 1e6
-
-plot_df <- as.data.frame(t(cpm[genes, , drop = FALSE]))
-plot_df$orig.ident <- cd8$orig.ident
-
-plot_df <- tidyr::pivot_longer(
-  plot_df,
-  cols = all_of(genes),
-  names_to = "gene",
-  values_to = "CPM")
-
-ggplot(plot_df, aes(x = orig.ident, y = CPM)) +
-  geom_boxplot(outlier.size = 0.5) +
-  facet_wrap(~gene, scales = "free_y") +
-  theme_classic() +
-  labs(x = NULL, y = "CPM") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-
-# next top genes
-genes <- head(bulk_results_cd8$gene, 12)[6:12]
-
-
-
-##########################################
-# Heatmap
-##########################################
-# Top 10 DE genes
-top_genes <- de_results |>
-  dplyr::filter(cell_type == "CD8/NK cell", !is.na(padj)) |>
-  dplyr::arrange(desc(log2FoldChange)) |>
-  dplyr::slice_head(n = 10) |>
-  dplyr::pull(gene)
-
-cd8_samples <- which(pseudo.s1$ammons.l1 == "CD8/NK cell")
-
-
-pheatmap(
-  mat,
-  cluster_rows = TRUE,
-  cluster_cols = TRUE,
-  show_colnames = TRUE,
-  fontsize_row = 7,
-  main = "CD8/NK cells: top 10 DE genes")
-
-
-# ------------------------------------------------------------------------------
-# (2) Randomizing to 500 cells per cell type
-# ------------------------------------------------------------------------------
-
-# TODO: Run this analysis
 
 # Print session info
 sessionInfo()
